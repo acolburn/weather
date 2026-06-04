@@ -42,31 +42,32 @@ function getWeatherIcon(code) {
 }
 
 function SearchBar({ value, onChange, onSearch }) {
-  const handleKeyDown = (event) => {
-    if (event.key === "Enter") {
-      onSearch();
-    }
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    onSearch();
   };
 
   return (
-    <div className="flex flex-col sm:flex-row gap-2 mb-8">
+    <form
+      onSubmit={handleSubmit}
+      className="flex flex-col sm:flex-row gap-2 mb-8"
+    >
       <input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        onKeyDown={handleKeyDown}
+        enterKeyHint="search"
         placeholder="Enter city name"
         className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-base"
       />
 
       <button
-        type="button"
-        onClick={onSearch}
+        type="submit"
         className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium w-full sm:w-auto"
       >
         Search
       </button>
-    </div>
+    </form>
   );
 }
 

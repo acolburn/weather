@@ -5,17 +5,31 @@ import {
   WiDaySunny,
   WiUmbrella,
   WiSnow,
-  WiDayWindy,
+  WiFog,
+  WiStormShowers,
+  WiCloud,
+  WiDayCloudy,
+  WiDayThunderstorm,
+  WiHail,
 } from "react-icons/wi";
+
+// HOW IT WORKS:
+// This app has two responsibilities:
+// 1) Get weather data (from geolocation on startup or from a searched city name)
+// 2) Render that data with small, reusable UI components
+//
+// WHY this structure:
+// Keeping data-fetching logic in the App component and UI display logic in child
+// components makes the code easier to reason about and easier to refactor later.
 
 // Map OpenMeteo weather codes to icon components
 const weatherCodeMap = {
   0: WiDaySunny, // Clear sky
-  1: WiCloudy, // Mainly clear
-  2: WiCloudy, // Partly cloudy
+  1: WiDayCloudy, // Mainly clear
+  2: WiCloud, // Partly cloudy
   3: WiCloudy, // Overcast
-  45: WiCloudy, // Foggy
-  48: WiCloudy, // Depositing rime fog
+  45: WiFog, // Foggy
+  48: WiFog, // Depositing rime fog
   51: WiUmbrella, // Light drizzle
   53: WiUmbrella, // Moderate drizzle
   55: WiUmbrella, // Dense drizzle
@@ -28,20 +42,43 @@ const weatherCodeMap = {
   77: WiSnow, // Snow grains
   80: WiUmbrella, // Slight rain showers
   81: WiUmbrella, // Moderate rain showers
-  82: WiUmbrella, // Violent rain showers
+  82: WiStormShowers, // Violent rain showers
   85: WiSnow, // Slight snow showers
   86: WiSnow, // Heavy snow showers
-  95: WiDayWindy, // Thunderstorm
-  96: WiDayWindy, // Thunderstorm with hail
-  99: WiDayWindy, // Thunderstorm with hail
+  95: WiDayThunderstorm, // Thunderstorm
+  96: WiDayThunderstorm, // Thunderstorm with hail
+  99: WiHail, // Thunderstorm with hail
 };
 
+// HOW IT WORKS:
+// Open-Meteo returns numeric weather codes. UI should not display raw numbers when
+// a visual icon is better for quick reading.
+//
+// WHY this helper exists:
+// It centralizes "code -> icon" mapping in one place. If you change icon choices,
+// you only change this function/map, not every component that displays weather.
 function getWeatherIcon(code) {
   const IconComponent = weatherCodeMap[code] || WiDaySunny;
   return <IconComponent size={52} />;
 }
 
+// HOW IT WORKS:
+// SearchBar is a controlled input. Its value is owned by App state and passed in
+// through props. User typing calls onChange, which updates App state.
+//
+// WHY controlled input:
+// A controlled input keeps the source of truth in React state, so the UI and state
+// never drift apart. This is especially important when multiple components depend
+// on the same value (search box text + heading label).
 function SearchBar({ value, onChange, onSearch }) {
+  // HOW IT WORKS:
+  // Submitting the form triggers this handler on desktop and mobile keyboards.
+  // event.preventDefault() stops full page reload, keeping this a single-page app.
+  // onSearch() delegates the actual search logic to App.
+  //
+  // WHY submit event instead of keydown only:
+  // Mobile keyboards do not always emit the same keydown behavior as desktop.
+  // Form submit is the most reliable cross-device trigger for "Enter/Search".
   const handleSubmit = (event) => {
     event.preventDefault();
     onSearch();
@@ -71,7 +108,20 @@ function SearchBar({ value, onChange, onSearch }) {
   );
 }
 
+// HOW IT WORKS:
+// This component renders the "current" weather card.
+// It receives data through props and does not fetch anything itself.
+//
+// WHY prop-driven rendering:
+// Keeping this component "presentational" makes it easier to test and reuse.
+// App decides what data to provide; this component only decides how it looks.
 function CurrentWeatherDisplay({ data, location }) {
+  // HOW IT WORKS:
+  // Guard clause for first render (or failed fetch): if no data, show helpful placeholder.
+  //
+  // WHY this guard is needed:
+  // React renders immediately before async requests finish. Without this guard,
+  // reading fields like data.temperature_2m would crash when data is null/undefined.
   if (!data) {
     return (
       <div className="bg-linear-to-br from-blue-400 to-blue-600 rounded-lg p-6 sm:p-8 text-white mb-8">
@@ -119,6 +169,13 @@ function CurrentWeatherDisplay({ data, location }) {
   );
 }
 
+// HOW IT WORKS:
+// ForecastCard displays one day of forecast. ForecastGrid passes values into this
+// component for each day.
+//
+// WHY isolate one card:
+// Repeating markup manually is error-prone. A reusable card component reduces
+// duplication and makes future style/content updates faster.
 function ForecastCard({ dayLabel, temp, rain, rainChance, weatherCode }) {
   return (
     <div className="bg-white border border-blue-600 rounded-lg p-4 text-center shadow-xl">
@@ -144,8 +201,17 @@ function ForecastCard({ dayLabel, temp, rain, rainChance, weatherCode }) {
   );
 }
 
+// HOW IT WORKS:
+// ForecastGrid receives a normalized "daily" object and renders 3 ForecastCard
+// components (tomorrow + two following days).
+//
+// WHY this component owns list rendering:
+// It keeps "which days are shown" and "how labels are derived" in one place,
+// so ForecastCard can stay simple and focused on display only.
 function ForecastGrid({ data }) {
   // Guard clause: do not render cards until forecast data exists.
+  // WHY this guard matters:
+  // During initial render, data is not ready yet. This prevents undefined access errors.
   if (
     !data ||
     !data.time ||
@@ -157,8 +223,14 @@ function ForecastGrid({ data }) {
     return null;
   }
 
+  // HOW IT WORKS:
+  // Converts Date values into weekday names.
+  // If dateValue is invalid/missing, fallbackOffsetDays keeps labels usable.
+  //
+  // WHY include UTC in formatting:
+  // Forecast dates often arrive around midnight boundaries. UTC formatting avoids
+  // local timezone shifts that can display the previous day name.
   const getWeekdayLabel = (dateValue, fallbackOffsetDays) => {
-    // Convert each forecast date to a weekday name like "Wednesday".
     const date = dateValue instanceof Date ? dateValue : null;
     if (date && !Number.isNaN(date.getTime())) {
       return date.toLocaleDateString("en-US", {
@@ -204,14 +276,52 @@ function ForecastGrid({ data }) {
   );
 }
 
+// HOW IT WORKS (React Hooks Deep Dive):
+// This is the stateful container component. It owns data fetching and state.
+// Child components are mostly presentational and receive props.
+//
+// useState explanation:
+// - useState creates state that survives re-renders.
+// - [locationInput, setLocationInput] stores current text in the search input.
+// - [weatherData, setWeatherData] stores fetched + normalized weather data.
+// - Calling a setter schedules a re-render with the new value.
+//
+// WHY useState here:
+// - locationInput changes with user typing and must drive both input + heading text.
+// - weatherData changes after async fetch and must update multiple UI sections
+//   (current conditions + forecast cards) in one consistent render.
+//
+// useEffect explanation:
+// - useEffect runs side effects after React renders.
+// - Side effects are operations outside pure rendering: API calls, geolocation,
+//   subscriptions, timers, manual DOM work, etc.
+// - This app uses useEffect once on mount to get device location automatically.
+//
+// WHY useEffect for geolocation:
+// - Geolocation is async and side-effectful (permission prompt + browser API call).
+// - It should not run during render itself.
+// - The empty dependency array [] means "run once after first render".
+//   This prevents repeated prompts/fetches on every re-render.
 export default function App() {
   // State: user input and the normalized weather object used by child components.
   const [locationInput, setLocationInput] = useState("");
   const [weatherData, setWeatherData] = useState(null);
 
+  // HOW IT WORKS:
+  // Shared fetch helper that accepts coordinates, calls Open-Meteo, normalizes
+  // response shape, then saves into weatherData state.
+  //
+  // WHY a shared helper:
+  // Both startup geolocation and manual city search need this same step.
+  // Sharing it avoids duplicate code and keeps behavior consistent.
   const fetchWeatherByCoords = async (lat, lon) => {
     // Step 2: request forecast data for those coordinates.
     try {
+      // HOW IT WORKS:
+      // params defines exactly which weather fields to request and how to format units.
+      //
+      // WHY request only needed fields:
+      // Smaller responses are faster and simpler to map to UI.
       const params = {
         latitude: lat,
         longitude: lon,
@@ -237,12 +347,17 @@ export default function App() {
       const url = "https://api.open-meteo.com/v1/forecast";
       const responses = await fetchWeatherApi(url, params);
 
+      // HOW IT WORKS:
+      // SDK returns an array; this app uses first response entry.
       const response = responses[0];
       const utcOffsetSeconds = response.utcOffsetSeconds();
       const current = response.current();
       const daily = response.daily();
 
       // Step 3: map API data into a simple UI-friendly object shape.
+      // WHY normalize data shape:
+      // UI components should not depend on low-level SDK response methods.
+      // A plain object is easier to inspect, debug, and pass via props.
       const forecastWeatherData = {
         current: {
           time: new Date(Number(current.time()) * 1000),
@@ -277,33 +392,58 @@ export default function App() {
       // Saving state triggers a re-render so UI components receive fresh props.
       setWeatherData(forecastWeatherData);
     } catch (error) {
+      // HOW IT WORKS:
+      // Catch prevents unhandled promise errors from crashing this flow.
+      // WHY keep this for beginners:
+      // Errors are inevitable with network calls; capturing them gives you one place
+      // to add user-facing error messages later.
       console.log(error);
     }
   };
 
+  // HOW IT WORKS:
+  // On first app load, attempt geolocation. If successful, set a friendly label
+  // and fetch weather immediately using those coordinates.
+  //
+  // WHY this improves UX:
+  // Users see local weather instantly without typing.
+  // If permission is denied, app still works with manual search.
   useEffect(() => {
     if (!navigator.geolocation) {
+      // WHY early return:
+      // Some environments may not support geolocation (older browsers, restricted contexts).
       return;
     }
 
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
-        setLocationInput(
-          //   `${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)} (current location)`,
-          "Current Location",
-        );
+        // HOW IT WORKS:
+        // The same location label appears in input and current-weather heading because
+        // both are driven by locationInput state.
+        setLocationInput("Current Location");
+
+        // WHY void keyword:
+        // fetchWeatherByCoords returns a promise. We intentionally fire-and-forget
+        // here and avoid awaiting inside this callback.
         void fetchWeatherByCoords(coords.latitude, coords.longitude);
       },
       (error) => {
+        // WHY log here:
+        // Denied permission should not break rendering; it should quietly fall back
+        // to manual search.
         console.log(error);
       },
     );
+    // Empty dependency array means this effect runs once on mount.
   }, []);
 
   // Runs when Search is clicked.
+  // HOW IT WORKS:
+  // Converts typed city -> coordinates -> weather data.
+  //
+  // WHY two-step process:
+  // Open-Meteo endpoint expects coordinates, so city text must be geocoded first.
   const handleSearch = async () => {
-    // Confirm locationInput worked properly
-    // console.log("Searching for:", locationInput);
     // Step 1: geocode the city name into latitude/longitude.
     let lat, lon; // declare here so usable outside try/catch
     try {
@@ -319,11 +459,18 @@ export default function App() {
     } catch (error) {
       console.log(error);
     }
-    // Confirm location coordinates worked properly
-    // console.log(locationInput + " coordinates:", lat, lon);
+
+    // WHY this call is separate:
+    // Search flow reuses the same coordinate-based fetch helper used by geolocation.
     await fetchWeatherByCoords(lat, lon);
   };
 
+  // HOW IT WORKS:
+  // App composes the page and passes state + handlers down through props.
+  //
+  // WHY this composition style:
+  // It keeps data ownership centralized while letting child components stay focused
+  // on rendering specific pieces of UI.
   return (
     <div className="min-h-screen bg-gray-100">
       <div className="max-w-4xl mx-auto px-4 py-6 sm:py-8">
@@ -336,11 +483,17 @@ export default function App() {
           onChange={setLocationInput}
           onSearch={handleSearch}
         />
-        {/* Props flow: parent App passes prepared data down to child components. */}
+
+        {/* HOW IT WORKS:
+            weatherData?.current uses optional chaining so first render is safe
+            before async data arrives. */}
         <CurrentWeatherDisplay
           data={weatherData?.current}
           location={locationInput}
         />
+
+        {/* HOW IT WORKS:
+            weatherData?.daily passes normalized daily arrays for 3 forecast cards. */}
         <ForecastGrid data={weatherData?.daily} />
       </div>
     </div>

@@ -39,6 +39,9 @@ const nwsKeywordIconMap = [
 const wholeNumber = (value) =>
   typeof value === "number" && !Number.isNaN(value) ? Math.floor(value) : "--";
 
+const oneDecimalPlace = (value) =>
+  typeof value === "number" && !Number.isNaN(value) ? value.toFixed(1) : "--";
+
 // HOW IT WORKS:
 // weather.gov gives text phrases (for example: "Partly Cloudy") rather than
 // numeric weather codes.
@@ -202,7 +205,8 @@ function PeriodCard({ period, variant }) {
       >
         <span className="font-semibold">Rain Chance:</span>{" "}
         {wholeNumber(period.precipitationChance)}%
-        {!isCurrent && ` (~${wholeNumber(period.precipitationInches)} inches)`}
+        {!isCurrent &&
+          ` (~${oneDecimalPlace(period.precipitationInches)} inches)`}
       </p>
     </div>
   );

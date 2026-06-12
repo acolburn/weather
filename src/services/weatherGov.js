@@ -15,7 +15,86 @@ const OPENWEATHER_API_KEY = "3071125f8bc56a2a5edba94357d0ef19";
 
 // weather.gov quantitative precipitation values are in millimeters.
 // Convert to inches for display in this app.
-const mmToInches = (value) => (typeof value === "number" ? value / 25.4 : 0);
+const mmToInches = (value) =>
+  typeof value === "number" && !Number.isNaN(value) ? value / 25.4 : null;
+
+const parseDurationToMilliseconds = (duration) => {
+  const match = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/.exec(
+    duration,
+  );
+
+  if (!match) {
+    return 0;
+  }
+
+  const [, days = "0", hours = "0", minutes = "0", seconds = "0"] = match;
+
+  return (
+    Number(days) * 24 * 60 * 60 * 1000 +
+    Number(hours) * 60 * 60 * 1000 +
+    Number(minutes) * 60 * 1000 +
+    Number(seconds) * 1000
+  );
+};
+
+const parseValidTimeRange = (validTime) => {
+  const [startTime, duration] = String(validTime ?? "").split("/");
+  const start = new Date(startTime);
+
+  if (Number.isNaN(start.getTime())) {
+    return null;
+  }
+
+  return {
+    start,
+    end: new Date(start.getTime() + parseDurationToMilliseconds(duration)),
+  };
+};
+
+const getPeriodQuantitativePrecipitationInches = (period, values) => {
+  if (!period?.startTime || !period?.endTime || !Array.isArray(values)) {
+    return null;
+  }
+
+  const periodStart = new Date(period.startTime).getTime();
+  const periodEnd = new Date(period.endTime).getTime();
+
+  if (Number.isNaN(periodStart) || Number.isNaN(periodEnd)) {
+    return null;
+  }
+
+  const totalMm = values.reduce((sum, entry) => {
+    const timeRange = parseValidTimeRange(entry?.validTime);
+
+    if (!timeRange || typeof entry?.value !== "number") {
+      return sum;
+    }
+
+    const overlaps =
+      timeRange.start.getTime() < periodEnd &&
+      timeRange.end.getTime() > periodStart;
+
+    return overlaps ? sum + entry.value : sum;
+  }, 0);
+
+  return mmToInches(totalMm);
+};
+
+const normalizePeriodWithPrecipitation = (period, values) => {
+  const normalizedPeriod = normalizePeriod(period);
+
+  if (!normalizedPeriod) {
+    return null;
+  }
+
+  return {
+    ...normalizedPeriod,
+    precipitationInches: getPeriodQuantitativePrecipitationInches(
+      period,
+      values,
+    ),
+  };
+};
 
 // Normalize one weather.gov period object into the UI shape used by components.
 // Returning a consistent shape makes rendering code simple and predictable.
@@ -27,11 +106,12 @@ const normalizePeriod = (period) => {
   return {
     name: period.name ?? "",
     time: period.startTime ? new Date(period.startTime) : null,
+    endTime: period.endTime ? new Date(period.endTime) : null,
     temperature: period.temperature ?? null,
     shortForecast: period.shortForecast ?? "Clear",
     weatherCode: period.shortForecast ?? "Clear",
     precipitationChance: period.probabilityOfPrecipitation?.value ?? 0,
-    precipitationInches: mmToInches(period?.quantitativePrecipitation?.value),
+    precipitationInches: null,
   };
 };
 
@@ -52,23 +132,36 @@ export async function fetchWeatherByCoords(lat, lon) {
   }
 
   const pointsData = await pointsResponse.json();
-  const { forecast: forecastUrl } = pointsData.properties ?? {};
+  const { forecast: forecastUrl, forecastGridData: gridDataUrl } =
+    pointsData.properties ?? {};
 
-  if (!forecastUrl) {
+  if (!forecastUrl || !gridDataUrl) {
     throw new Error("weather.gov points response missing forecast link");
   }
 
-  // Step 2: Fetch the period-based forecast from weather.gov.
-  const forecastResponse = await fetch(forecastUrl, {
-    headers: WEATHER_HEADERS,
-  });
+  // Step 2: Fetch the period-based forecast and grid data from weather.gov.
+  const [forecastResponse, gridDataResponse] = await Promise.all([
+    fetch(forecastUrl, {
+      headers: WEATHER_HEADERS,
+    }),
+    fetch(gridDataUrl, {
+      headers: WEATHER_HEADERS,
+    }),
+  ]);
 
   if (!forecastResponse.ok) {
     throw new Error("Unable to fetch weather.gov forecast");
   }
 
+  if (!gridDataResponse.ok) {
+    throw new Error("Unable to fetch weather.gov forecast grid data");
+  }
+
   const forecastData = await forecastResponse.json();
+  const gridData = await gridDataResponse.json();
   const allPeriods = forecastData?.properties?.periods ?? [];
+  const precipitationValues =
+    gridData?.properties?.quantitativePrecipitation?.values ?? [];
 
   const firstPeriod = allPeriods[0] ?? null;
   const isDaytime = firstPeriod?.isDaytime ?? true;
@@ -76,14 +169,19 @@ export async function fetchWeatherByCoords(lat, lon) {
   // Daytime response starts with "Today", then "Tonight".
   // Nighttime response starts with "Tonight" only.
   const currentPeriods = isDaytime
-    ? [normalizePeriod(allPeriods[0]), normalizePeriod(allPeriods[1])]
-    : [normalizePeriod(allPeriods[0])];
+    ? [
+        normalizePeriodWithPrecipitation(allPeriods[0], precipitationValues),
+        normalizePeriodWithPrecipitation(allPeriods[1], precipitationValues),
+      ]
+    : [normalizePeriodWithPrecipitation(allPeriods[0], precipitationValues)];
 
   // Forecast cards should show upcoming periods after the current section.
   const forecastStart = isDaytime ? 2 : 1;
   const forecastPeriods = allPeriods
     .slice(forecastStart, forecastStart + 4)
-    .map(normalizePeriod)
+    .map((period) =>
+      normalizePeriodWithPrecipitation(period, precipitationValues),
+    )
     .filter(Boolean);
 
   return {

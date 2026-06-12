@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import Combobox from "react-widgets/Combobox";
+import "react-widgets/styles.css";
 import {
   WiCloudy,
   WiDaySunny,
@@ -68,6 +70,7 @@ function SearchBar({ value, onChange, onSearch }) {
     "Atascadero, CA",
     "Brinnon, WA",
     "Granite Bay, CA",
+    "White Plains, NY",
   ];
 
   const hasPresetLocation = locations.includes(value);
@@ -85,38 +88,39 @@ function SearchBar({ value, onChange, onSearch }) {
     onSearch();
   };
 
+  const comboboxLocations = [
+    ...locations,
+    ...(value === "Current Location" && !hasPresetLocation
+      ? ["Current Location"]
+      : []),
+  ];
+
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex flex-col sm:flex-row gap-2 mb-8"
+      className="flex flex-col sm:flex-row gap-2 mb-8 sm:items-center"
     >
-      <select
+      <Combobox
         value={value}
-        onChange={(e) => {
-          onChange(e.target.value);
-          onSearch(e.target.value);
+        onChange={onChange}
+        onSelect={(item) => {
+          onChange(item);
+          onSearch(item);
         }}
-        aria-label="Select location"
-        className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-base"
-      >
-        <option value="" disabled>
-          Select location ...
-        </option>
-        {locations.map((location) => (
-          <option key={location} value={location}>
-            {location}
-          </option>
-        ))}
-        {!hasPresetLocation && value === "Current Location" && (
-          <option value="Current Location">
-            Current location (tap for more)
-          </option>
-        )}
-      </select>
+        data={comboboxLocations}
+        placeholder="Select location ..."
+        filter="contains"
+        containerClassName="flex-1 h-12"
+        inputProps={{
+          className:
+            "w-full h-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-base",
+          "aria-label": "Select or type location",
+        }}
+      />
 
       <button
         type="submit"
-        className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium w-full sm:w-auto"
+        className="px-6 h-12 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium w-full sm:w-auto"
       >
         Search
       </button>

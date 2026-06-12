@@ -53,14 +53,25 @@ function getWeatherIcon(forecastText) {
 }
 
 // HOW IT WORKS:
-// SearchBar is a controlled input. Its value is owned by App state and passed in
-// through props. User typing calls onChange, which updates App state.
+// SearchBar is a controlled dropdown. Its value is owned by App state and passed
+// in through props. User selection calls onChange, which updates App state.
 //
-// WHY controlled input:
-// A controlled input keeps the source of truth in React state, so the UI and state
-// never drift apart. This is especially important when multiple components depend
-// on the same value (search box text + heading label).
+// WHY controlled dropdown:
+// A controlled select keeps the source of truth in React state, so the UI and
+// state never drift apart. This is especially important when multiple components
+// depend on the same value (location selection + heading label).
 function SearchBar({ value, onChange, onSearch }) {
+  const locations = [
+    "Long Beach, CA",
+    "Cypress, CA",
+    "Costa Mesa, CA",
+    "Atascadero, CA",
+    "Brinnon, WA",
+    "Granite Bay, CA",
+  ];
+
+  const hasPresetLocation = locations.includes(value);
+
   // HOW IT WORKS:
   // Submitting the form triggers this handler on desktop and mobile keyboards.
   // event.preventDefault() stops full page reload, keeping this a single-page app.
@@ -79,14 +90,26 @@ function SearchBar({ value, onChange, onSearch }) {
       onSubmit={handleSubmit}
       className="flex flex-col sm:flex-row gap-2 mb-8"
     >
-      <input
-        type="text"
+      <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        enterKeyHint="search"
-        placeholder="Enter city name"
+        aria-label="Select location"
         className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-base"
-      />
+      >
+        <option value="" disabled>
+          Select location ...
+        </option>
+        {locations.map((location) => (
+          <option key={location} value={location}>
+            {location}
+          </option>
+        ))}
+        {!hasPresetLocation && value === "Current Location" && (
+          <option value="Current Location">
+            Current location (tap for more)
+          </option>
+        )}
+      </select>
 
       <button
         type="submit"
@@ -285,8 +308,34 @@ function ForecastGrid({ periods }) {
 export default function App() {
   // locationInput: controlled text input value
   // weatherData: normalized weather data from weatherGov service helpers
+  // deviceCoords: latest successful geolocation coordinates for this session
   const [locationInput, setLocationInput] = useState("");
   const [weatherData, setWeatherData] = useState(null);
+  const [deviceCoords, setDeviceCoords] = useState(null);
+
+  // HOW IT WORKS:
+  // Wrap the browser callback-style geolocation API in a Promise so we can use
+  // async/await in handleSearch.
+  //
+  // WHY this helper exists:
+  // It keeps geolocation details in one place and makes the search logic easier
+  // to read for beginners.
+  const getDeviceCoords = () =>
+    new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error("Geolocation not supported"));
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        ({ coords }) => {
+          resolve({ lat: coords.latitude, lon: coords.longitude });
+        },
+        (error) => {
+          reject(error);
+        },
+      );
+    });
 
   // Shared loader used by startup geolocation and manual city search.
   const loadWeatherByCoords = async (lat, lon) => {
@@ -314,6 +363,12 @@ export default function App() {
 
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
+        const latestCoords = { lat: coords.latitude, lon: coords.longitude };
+
+        // Save geolocation coordinates so future "Current Location" searches
+        // can reuse them without geocoding a text string.
+        setDeviceCoords(latestCoords);
+
         // HOW IT WORKS:
         // The same location label appears in input and current-weather heading because
         // both are driven by locationInput state.
@@ -322,7 +377,7 @@ export default function App() {
         // WHY void keyword:
         // loadWeatherByCoords returns a promise. We intentionally fire-and-forget
         // here and avoid awaiting inside this callback.
-        void loadWeatherByCoords(coords.latitude, coords.longitude);
+        void loadWeatherByCoords(latestCoords.lat, latestCoords.lon);
       },
       (error) => {
         // WHY log here:
@@ -337,6 +392,21 @@ export default function App() {
   // Search flow: city text -> coordinates -> weather.
   const handleSearch = async () => {
     try {
+      // HOW IT WORKS:
+      // "Current Location" should use geolocation coordinates, not city geocoding.
+      // First try cached session coords. If not available, request coordinates now.
+      if (locationInput === "Current Location") {
+        let coordsToUse = deviceCoords;
+
+        if (!coordsToUse) {
+          coordsToUse = await getDeviceCoords();
+          setDeviceCoords(coordsToUse);
+        }
+
+        await loadWeatherByCoords(coordsToUse.lat, coordsToUse.lon);
+        return;
+      }
+
       const { lat, lon } = await geocodeLocation(locationInput);
       await loadWeatherByCoords(lat, lon);
     } catch (error) {

@@ -94,7 +94,7 @@ function SearchBar({ value, onChange, onSearch }) {
         value={value}
         onChange={(e) => {
           onChange(e.target.value);
-          onSearch();
+          onSearch(e.target.value);
         }}
         aria-label="Select location"
         className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-base"
@@ -393,12 +393,12 @@ export default function App() {
   }, []);
 
   // Search flow: city text -> coordinates -> weather.
-  const handleSearch = async () => {
+  const handleSearch = async (location = locationInput) => {
     try {
       // HOW IT WORKS:
       // "Current Location" should use geolocation coordinates, not city geocoding.
       // First try cached session coords. If not available, request coordinates now.
-      if (locationInput === "Current Location") {
+      if (location === "Current Location") {
         let coordsToUse = deviceCoords;
 
         if (!coordsToUse) {
@@ -410,7 +410,7 @@ export default function App() {
         return;
       }
 
-      const { lat, lon } = await geocodeLocation(locationInput);
+      const { lat, lon } = await geocodeLocation(location);
       await loadWeatherByCoords(lat, lon);
     } catch (error) {
       console.log(error);

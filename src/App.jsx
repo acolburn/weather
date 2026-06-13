@@ -67,6 +67,7 @@ function getWeatherIcon(forecastText) {
 // depend on the same value (location selection + heading label).
 function SearchBar({ value, onChange, onSearch }) {
   const latestInputValueRef = useRef(value ?? "");
+  const comboboxInputRef = useRef(null);
 
   useEffect(() => {
     latestInputValueRef.current = value ?? "";
@@ -101,10 +102,15 @@ function SearchBar({ value, onChange, onSearch }) {
     return latestInputValueRef.current.trim();
   };
 
+  const closeCombobox = () => {
+    comboboxInputRef.current?.blur();
+  };
+
   const handleSubmit = (event) => {
     event.preventDefault();
 
     onSearch(getLiveLocationValue(event.currentTarget));
+    closeCombobox();
   };
 
   const handleFormKeyDownCapture = (event) => {
@@ -119,6 +125,7 @@ function SearchBar({ value, onChange, onSearch }) {
 
     event.preventDefault();
     onSearch(getLiveLocationValue(event.currentTarget));
+    closeCombobox();
   };
 
   const handleComboboxChange = (nextValue) => {
@@ -146,6 +153,7 @@ function SearchBar({ value, onChange, onSearch }) {
           latestInputValueRef.current = String(item ?? "");
           onChange(item);
           onSearch(item);
+          closeCombobox();
         }}
         data={comboboxLocations}
         placeholder="Select location ..."
@@ -155,6 +163,7 @@ function SearchBar({ value, onChange, onSearch }) {
           className:
             "w-full h-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-base",
           "aria-label": "Select or type location",
+          ref: comboboxInputRef,
           onInput: (event) => {
             latestInputValueRef.current = event.currentTarget.value;
           },
@@ -358,9 +367,11 @@ function ForecastGrid({ periods }) {
 //   This prevents repeated prompts/fetches on every re-render.
 export default function App() {
   // locationInput: controlled text input value
+  // locationLabel: label shown in the weather card after a successful search
   // weatherData: normalized weather data from weatherGov service helpers
   // deviceCoords: latest successful geolocation coordinates for this session
   const [locationInput, setLocationInput] = useState("");
+  const [locationLabel, setLocationLabel] = useState("");
   const [weatherData, setWeatherData] = useState(null);
   const [deviceCoords, setDeviceCoords] = useState(null);
   const [isLoadingWeather, setIsLoadingWeather] = useState(false);
@@ -452,8 +463,9 @@ export default function App() {
         setStatusMessage("");
         const latestCoords = await getDeviceCoords();
         setDeviceCoords(latestCoords);
-        setLocationInput("Current Location");
         await loadWeatherByCoords(latestCoords.lat, latestCoords.lon);
+        setLocationLabel("Current Location");
+        setLocationInput("");
       } catch (error) {
         setStatusMessage(getFriendlyErrorMessage(error, true));
         console.log(error);
@@ -481,8 +493,6 @@ export default function App() {
       // "Current Location" should use geolocation coordinates, not city geocoding.
       // First try cached session coords. If not available, request coordinates now.
       if (normalizedLocation === "Current Location") {
-        setLocationInput("Current Location");
-
         let coordsToUse = deviceCoords;
 
         if (!coordsToUse) {
@@ -491,6 +501,8 @@ export default function App() {
         }
 
         await loadWeatherByCoords(coordsToUse.lat, coordsToUse.lon);
+        setLocationLabel("Current Location");
+        setLocationInput("");
         return;
       }
 
@@ -503,6 +515,8 @@ export default function App() {
 
       const { lat, lon } = await geocodeLocation(normalizedLocation);
       await loadWeatherByCoords(lat, lon);
+      setLocationLabel(normalizedLocation);
+      setLocationInput("");
     } catch (error) {
       setStatusMessage(getFriendlyErrorMessage(error, isStartupLoad));
       console.log(error);
@@ -545,7 +559,7 @@ export default function App() {
             before async data arrives. */}
         <CurrentWeatherDisplay
           periods={weatherData?.currentPeriods}
-          location={locationInput}
+          location={locationLabel}
         />
 
         {/* HOW IT WORKS:

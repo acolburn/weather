@@ -118,6 +118,12 @@ function SearchBar({ value, onChange, onSearch }) {
           className:
             "w-full h-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-base",
           "aria-label": "Select or type location",
+          onKeyDown: (event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              onSearch();
+            }
+          },
         }}
       />
 

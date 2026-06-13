@@ -66,6 +66,12 @@ function getWeatherIcon(forecastText) {
 // state never drift apart. This is especially important when multiple components
 // depend on the same value (location selection + heading label).
 function SearchBar({ value, onChange, onSearch }) {
+  const latestInputValueRef = useRef(value ?? "");
+
+  useEffect(() => {
+    latestInputValueRef.current = value ?? "";
+  }, [value]);
+
   const locations = [
     "Long Beach, CA",
     "Cypress, CA",
@@ -86,9 +92,38 @@ function SearchBar({ value, onChange, onSearch }) {
   // WHY submit event instead of keydown only:
   // Mobile keyboards do not always emit the same keydown behavior as desktop.
   // Form submit is the most reliable cross-device trigger for "Enter/Search".
+  const getLiveLocationValue = (formElement) => {
+    const inputElement = formElement.querySelector("input");
+    if (inputElement && typeof inputElement.value === "string") {
+      return inputElement.value.trim();
+    }
+
+    return latestInputValueRef.current.trim();
+  };
+
   const handleSubmit = (event) => {
     event.preventDefault();
-    onSearch();
+
+    onSearch(getLiveLocationValue(event.currentTarget));
+  };
+
+  const handleFormKeyDownCapture = (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) {
+      return;
+    }
+
+    event.preventDefault();
+    onSearch(getLiveLocationValue(event.currentTarget));
+  };
+
+  const handleComboboxChange = (nextValue) => {
+    latestInputValueRef.current = String(nextValue ?? "");
+    onChange(nextValue);
   };
 
   const comboboxLocations = [
@@ -101,12 +136,14 @@ function SearchBar({ value, onChange, onSearch }) {
   return (
     <form
       onSubmit={handleSubmit}
+      onKeyDownCapture={handleFormKeyDownCapture}
       className="flex flex-col sm:flex-row gap-2 mb-8 sm:items-center"
     >
       <Combobox
         value={value}
-        onChange={onChange}
+        onChange={handleComboboxChange}
         onSelect={(item) => {
+          latestInputValueRef.current = String(item ?? "");
           onChange(item);
           onSearch(item);
         }}
@@ -118,11 +155,8 @@ function SearchBar({ value, onChange, onSearch }) {
           className:
             "w-full h-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-base",
           "aria-label": "Select or type location",
-          onKeyDown: (event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              onSearch();
-            }
+          onInput: (event) => {
+            latestInputValueRef.current = event.currentTarget.value;
           },
         }}
       />
@@ -464,6 +498,8 @@ export default function App() {
         setStatusMessage("Enter a location to search.");
         return;
       }
+
+      setLocationInput(normalizedLocation);
 
       const { lat, lon } = await geocodeLocation(normalizedLocation);
       await loadWeatherByCoords(lat, lon);

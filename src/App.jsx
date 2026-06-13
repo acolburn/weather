@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Combobox from "react-widgets/Combobox";
 import "react-widgets/styles.css";
 import {
@@ -329,6 +329,35 @@ export default function App() {
   const [locationInput, setLocationInput] = useState("");
   const [weatherData, setWeatherData] = useState(null);
   const [deviceCoords, setDeviceCoords] = useState(null);
+  const [isLoadingWeather, setIsLoadingWeather] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("");
+  const hasAttemptedStartupLoad = useRef(false);
+
+  const getFriendlyErrorMessage = (error, isStartupLoad = false) => {
+    if (error?.code === 1) {
+      return isStartupLoad
+        ? "Location permission denied. Search by city to see weather."
+        : "Location permission denied.";
+    }
+
+    if (error?.code === 2) {
+      return isStartupLoad
+        ? "Could not determine your location. Search by city to see weather."
+        : "Could not determine your location.";
+    }
+
+    if (error?.code === 3) {
+      return isStartupLoad
+        ? "Location lookup timed out. Search by city to see weather."
+        : "Location lookup timed out.";
+    }
+
+    if (error?.message === "Location not found") {
+      return "Location not found. Try a City, ST format.";
+    }
+
+    return "Unable to load weather right now. Please try again.";
+  };
 
   // HOW IT WORKS:
   // Wrap the browser callback-style geolocation API in a Promise so we can use
@@ -351,17 +380,18 @@ export default function App() {
         (error) => {
           reject(error);
         },
+        {
+          enableHighAccuracy: false,
+          timeout: 10000,
+          maximumAge: 300000,
+        },
       );
     });
 
   // Shared loader used by startup geolocation and manual city search.
   const loadWeatherByCoords = async (lat, lon) => {
-    try {
-      const data = await fetchWeatherByCoordsFromApi(lat, lon);
-      setWeatherData(data);
-    } catch (error) {
-      console.log(error);
-    }
+    const data = await fetchWeatherByCoordsFromApi(lat, lon);
+    setWeatherData(data);
   };
 
   // HOW IT WORKS:
@@ -372,47 +402,53 @@ export default function App() {
   // Users see local weather instantly without typing.
   // If permission is denied, app still works with manual search.
   useEffect(() => {
-    if (!navigator.geolocation) {
-      // WHY early return:
-      // Some environments may not support geolocation (older browsers, restricted contexts).
+    if (hasAttemptedStartupLoad.current) {
       return;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      ({ coords }) => {
-        const latestCoords = { lat: coords.latitude, lon: coords.longitude };
+    hasAttemptedStartupLoad.current = true;
 
-        // Save geolocation coordinates so future "Current Location" searches
-        // can reuse them without geocoding a text string.
+    // WHY fire-and-forget:
+    // Startup weather loading is best-effort. If geolocation is denied/unavailable,
+    // the app should stay interactive and allow manual search.
+    void (async () => {
+      setIsLoadingWeather(true);
+
+      try {
+        setStatusMessage("");
+        const latestCoords = await getDeviceCoords();
         setDeviceCoords(latestCoords);
-
-        // HOW IT WORKS:
-        // The same location label appears in input and current-weather heading because
-        // both are driven by locationInput state.
         setLocationInput("Current Location");
-
-        // WHY void keyword:
-        // loadWeatherByCoords returns a promise. We intentionally fire-and-forget
-        // here and avoid awaiting inside this callback.
-        void loadWeatherByCoords(latestCoords.lat, latestCoords.lon);
-      },
-      (error) => {
-        // WHY log here:
-        // Denied permission should not break rendering; it should quietly fall back
-        // to manual search.
+        await loadWeatherByCoords(latestCoords.lat, latestCoords.lon);
+      } catch (error) {
+        setStatusMessage(getFriendlyErrorMessage(error, true));
         console.log(error);
-      },
-    );
+      } finally {
+        setIsLoadingWeather(false);
+      }
+    })();
+
     // Empty dependency array means this effect runs once on mount.
   }, []);
 
   // Search flow: city text -> coordinates -> weather.
-  const handleSearch = async (location = locationInput) => {
+  const handleSearch = async (
+    location = locationInput,
+    isStartupLoad = false,
+  ) => {
+    setIsLoadingWeather(true);
+
     try {
+      setStatusMessage("");
+
+      const normalizedLocation = String(location ?? "").trim();
+
       // HOW IT WORKS:
       // "Current Location" should use geolocation coordinates, not city geocoding.
       // First try cached session coords. If not available, request coordinates now.
-      if (location === "Current Location") {
+      if (normalizedLocation === "Current Location") {
+        setLocationInput("Current Location");
+
         let coordsToUse = deviceCoords;
 
         if (!coordsToUse) {
@@ -424,10 +460,18 @@ export default function App() {
         return;
       }
 
-      const { lat, lon } = await geocodeLocation(location);
+      if (!normalizedLocation) {
+        setStatusMessage("Enter a location to search.");
+        return;
+      }
+
+      const { lat, lon } = await geocodeLocation(normalizedLocation);
       await loadWeatherByCoords(lat, lon);
     } catch (error) {
+      setStatusMessage(getFriendlyErrorMessage(error, isStartupLoad));
       console.log(error);
+    } finally {
+      setIsLoadingWeather(false);
     }
   };
 
@@ -449,6 +493,16 @@ export default function App() {
           onChange={setLocationInput}
           onSearch={handleSearch}
         />
+
+        {isLoadingWeather && (
+          <p className="text-sm text-gray-600 mb-4">Loading weather...</p>
+        )}
+
+        {!isLoadingWeather && statusMessage && (
+          <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+            {statusMessage}
+          </p>
+        )}
 
         {/* HOW IT WORKS:
             weatherData?.current uses optional chaining so first render is safe

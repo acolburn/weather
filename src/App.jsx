@@ -149,7 +149,7 @@ function SearchBar({ value, onChange, onSearch }) {
         }}
         data={comboboxLocations}
         placeholder="Select location ..."
-        filter="contains"
+        filter={false}
         containerClassName="flex-1 h-12"
         inputProps={{
           className:

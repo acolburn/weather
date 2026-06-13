@@ -68,6 +68,7 @@ function getWeatherIcon(forecastText) {
 function SearchBar({ value, onChange, onSearch }) {
   const latestInputValueRef = useRef(value ?? "");
   const comboboxInputRef = useRef(null);
+  const [isComboboxOpen, setIsComboboxOpen] = useState(false);
 
   useEffect(() => {
     latestInputValueRef.current = value ?? "";
@@ -103,6 +104,7 @@ function SearchBar({ value, onChange, onSearch }) {
   };
 
   const closeCombobox = () => {
+    setIsComboboxOpen(false);
     comboboxInputRef.current?.blur();
   };
 
@@ -147,6 +149,13 @@ function SearchBar({ value, onChange, onSearch }) {
       className="flex flex-col sm:flex-row gap-2 mb-8 sm:items-center"
     >
       <Combobox
+        open={isComboboxOpen}
+        onToggle={(nextOpen) => {
+          setIsComboboxOpen(Boolean(nextOpen));
+        }}
+        onFocus={() => {
+          setIsComboboxOpen(true);
+        }}
         value={value}
         onChange={handleComboboxChange}
         onSelect={(item) => {

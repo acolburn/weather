@@ -16,7 +16,23 @@ import {
   geocodeLocation,
 } from "./services/weatherGov";
 
-// App owns data-fetching/state, while child components focus on rendering.
+/*
+  MAINTAINER GUIDE (React Hooks Edition)
+  --------------------------------------
+  What this file does:
+  1) Own all weather-related state and async loading logic in App.
+  2) Keep child components mostly presentational (render-only).
+
+  Why this structure helps beginners:
+  - One place (App) controls state transitions.
+  - UI components receive props and stay predictable.
+  - Search and startup flows reuse shared helpers to avoid duplicated logic.
+
+  Hook usage at a glance:
+  - useState: values that should trigger UI re-renders when they change.
+  - useRef: mutable values that must persist between renders without re-rendering.
+  - useEffect: startup side effect (initial geolocation weather load).
+*/
 
 const nwsKeywordIconMap = [
   { test: /thunder|tstorm|storm/i, icon: WiDayThunderstorm },
@@ -56,17 +72,24 @@ function getWeatherIcon(forecastText) {
 
 // SearchBar is controlled by App state (`value` + `onChange`).
 function SearchBar({ value, onChange, onSearch }) {
+  // Refs store mutable values between renders without causing re-renders.
+  // latestInputValueRef tracks the freshest typed text (even before state settles).
+  // comboboxInputRef gives direct access to the underlying input element.
   const latestInputValueRef = useRef(value ?? "");
   const comboboxInputRef = useRef(null);
+
+  // Local UI state for controlling whether the combobox popup is open.
   const [isComboboxOpen, setIsComboboxOpen] = useState(false);
 
+  // Keep the ref in sync whenever parent-controlled value changes.
   useEffect(() => {
     latestInputValueRef.current = value ?? "";
   }, [value]);
 
   const hasPresetLocation = presetLocations.includes(value);
 
-  // Read the live text value from the combobox input.
+  // Reads what user actually typed at submit time.
+  // This avoids race conditions where state may lag one keystroke.
   const readSubmittedLocation = () => {
     const inputElement = comboboxInputRef.current;
     if (inputElement && typeof inputElement.value === "string") {
@@ -81,6 +104,7 @@ function SearchBar({ value, onChange, onSearch }) {
     comboboxInputRef.current?.blur();
   };
 
+  // Shared submit path used by button click, Enter key, and dropdown selection.
   const submitSearch = (rawLocation) => {
     onSearch(rawLocation);
     closeCombobox();
@@ -164,6 +188,7 @@ function SearchBar({ value, onChange, onSearch }) {
 }
 
 // Reusable weather card for current and forecast sections.
+// This component is intentionally stateless: all data arrives through props.
 function PeriodCard({ period, variant }) {
   const isCurrent = variant === "current";
 
@@ -236,6 +261,7 @@ function PeriodCard({ period, variant }) {
 }
 
 // Current weather display (presentational only).
+// If periods is empty, render a friendly placeholder state.
 function CurrentWeatherDisplay({ periods, location }) {
   if (!periods || periods.length === 0) {
     return (
@@ -275,6 +301,7 @@ function CurrentWeatherDisplay({ periods, location }) {
 }
 
 // Forecast grid for upcoming periods.
+// Returns null when no forecast exists so parent layout remains clean.
 function ForecastGrid({ periods }) {
   if (!periods || periods.length === 0) {
     return null;
@@ -300,19 +327,30 @@ function ForecastGrid({ periods }) {
 
 // App container: fetches weather data and passes it to presentational components.
 export default function App() {
+  /*
+    State model:
+    - locationInput: current text shown in the search box.
+    - locationLabel: location currently displayed in weather header.
+    - weatherData: normalized API result for current + forecast sections.
+    - deviceCoords: cached geolocation for fast "Current Location" reloads.
+    - isLoadingWeather/statusMessage: UI feedback for async operations.
+  */
   const [locationInput, setLocationInput] = useState("");
   const [locationLabel, setLocationLabel] = useState("");
   const [weatherData, setWeatherData] = useState(null);
   const [deviceCoords, setDeviceCoords] = useState(null);
   const [isLoadingWeather, setIsLoadingWeather] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+  // Prevent duplicate startup requests (useful under React StrictMode dev behavior).
   const hasAttemptedStartupLoad = useRef(false);
 
+  // Called after any successful weather request to sync display label and clear search box.
   const applySuccessfulLocation = (label) => {
     setLocationLabel(label);
     setLocationInput("");
   };
 
+  // Converts low-level errors into user-friendly text.
   const getFriendlyErrorMessage = (error, isStartupLoad = false) => {
     if (error?.code === 1) {
       return isStartupLoad
@@ -339,7 +377,7 @@ export default function App() {
     return "Unable to load weather right now. Please try again.";
   };
 
-  // Promise wrapper around browser geolocation so async/await can be used.
+  // Promise wrapper around callback-based geolocation for async/await usage.
   const getDeviceCoords = () =>
     new Promise((resolve, reject) => {
       if (!navigator.geolocation) {
@@ -362,12 +400,13 @@ export default function App() {
       );
     });
 
-  // Shared weather loader used by startup and manual searches.
+  // Shared network loader for weather.gov forecast data by coordinates.
   const loadWeatherByCoords = async (lat, lon) => {
     const data = await fetchWeatherByCoordsFromApi(lat, lon);
     setWeatherData(data);
   };
 
+  // Uses cached device coordinates when possible, otherwise asks browser again.
   const searchCurrentLocation = async () => {
     let coordsToUse = deviceCoords;
 
@@ -380,6 +419,7 @@ export default function App() {
     applySuccessfulLocation("Current Location");
   };
 
+  // Geocodes typed city/state text, then loads weather by resulting coordinates.
   const searchTypedLocation = async (normalizedLocation) => {
     if (!normalizedLocation) {
       setStatusMessage("Enter a location to search.");
@@ -392,7 +432,7 @@ export default function App() {
     applySuccessfulLocation(normalizedLocation);
   };
 
-  // Try loading local weather once on first render.
+  // Startup effect: try loading local weather once when component mounts.
   useEffect(() => {
     if (hasAttemptedStartupLoad.current) {
       return;
@@ -418,10 +458,14 @@ export default function App() {
       }
     };
 
+    // Fire and forget inside effect. Internal try/catch handles failures.
     void runStartupWeatherLoad();
   }, []);
 
-  // Search flow: location text -> coordinates -> weather.
+  // Main search entrypoint used by SearchBar.
+  // 1) Normalize input
+  // 2) Route to current-location flow or typed-location flow
+  // 3) Manage loading + user-facing error message
   const handleSearch = async (
     location = locationInput,
     isStartupLoad = false,

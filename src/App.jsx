@@ -16,14 +16,7 @@ import {
   geocodeLocation,
 } from "./services/weatherGov";
 
-// HOW IT WORKS:
-// This app has two responsibilities:
-// 1) Get weather data (from geolocation on startup or from a searched city name)
-// 2) Render that data with small, reusable UI components
-//
-// WHY this structure:
-// Keeping data-fetching logic in the App component and UI display logic in child
-// components makes the code easier to reason about and easier to refactor later.
+// App owns data-fetching/state, while child components focus on rendering.
 
 const nwsKeywordIconMap = [
   { test: /thunder|tstorm|storm/i, icon: WiDayThunderstorm },
@@ -36,19 +29,23 @@ const nwsKeywordIconMap = [
   { test: /clear|sunny|fair/i, icon: WiDaySunny },
 ];
 
+const presetLocations = [
+  "Long Beach, CA",
+  "Cypress, CA",
+  "Costa Mesa, CA",
+  "Atascadero, CA",
+  "Brinnon, WA",
+  "Granite Bay, CA",
+  "White Plains, NY",
+];
+
 const wholeNumber = (value) =>
   typeof value === "number" && !Number.isNaN(value) ? Math.floor(value) : "--";
 
 const oneDecimalPlace = (value) =>
   typeof value === "number" && !Number.isNaN(value) ? value.toFixed(1) : "--";
 
-// HOW IT WORKS:
-// weather.gov gives text phrases (for example: "Partly Cloudy") rather than
-// numeric weather codes.
-//
-// WHY this helper exists:
-// It centralizes text->icon mapping so component markup stays simple.
-// If you want different icon choices later, change this one function.
+// Map weather.gov forecast text to an icon component.
 function getWeatherIcon(forecastText) {
   const keywordMatch = nwsKeywordIconMap.find(({ test }) =>
     test.test(String(forecastText ?? "")),
@@ -57,14 +54,7 @@ function getWeatherIcon(forecastText) {
   return <IconComponent size={52} />;
 }
 
-// HOW IT WORKS:
-// SearchBar is a controlled dropdown. Its value is owned by App state and passed
-// in through props. User selection calls onChange, which updates App state.
-//
-// WHY controlled dropdown:
-// A controlled select keeps the source of truth in React state, so the UI and
-// state never drift apart. This is especially important when multiple components
-// depend on the same value (location selection + heading label).
+// SearchBar is controlled by App state (`value` + `onChange`).
 function SearchBar({ value, onChange, onSearch }) {
   const latestInputValueRef = useRef(value ?? "");
   const comboboxInputRef = useRef(null);
@@ -74,28 +64,11 @@ function SearchBar({ value, onChange, onSearch }) {
     latestInputValueRef.current = value ?? "";
   }, [value]);
 
-  const locations = [
-    "Long Beach, CA",
-    "Cypress, CA",
-    "Costa Mesa, CA",
-    "Atascadero, CA",
-    "Brinnon, WA",
-    "Granite Bay, CA",
-    "White Plains, NY",
-  ];
+  const hasPresetLocation = presetLocations.includes(value);
 
-  const hasPresetLocation = locations.includes(value);
-
-  // HOW IT WORKS:
-  // Submitting the form triggers this handler on desktop and mobile keyboards.
-  // event.preventDefault() stops full page reload, keeping this a single-page app.
-  // onSearch() delegates the actual search logic to App.
-  //
-  // WHY submit event instead of keydown only:
-  // Mobile keyboards do not always emit the same keydown behavior as desktop.
-  // Form submit is the most reliable cross-device trigger for "Enter/Search".
-  const getLiveLocationValue = (formElement) => {
-    const inputElement = formElement.querySelector("input");
+  // Read the live text value from the combobox input.
+  const readSubmittedLocation = () => {
+    const inputElement = comboboxInputRef.current;
     if (inputElement && typeof inputElement.value === "string") {
       return inputElement.value.trim();
     }
@@ -108,11 +81,14 @@ function SearchBar({ value, onChange, onSearch }) {
     comboboxInputRef.current?.blur();
   };
 
+  const submitSearch = (rawLocation) => {
+    onSearch(rawLocation);
+    closeCombobox();
+  };
+
   const handleSubmit = (event) => {
     event.preventDefault();
-
-    onSearch(getLiveLocationValue(event.currentTarget));
-    closeCombobox();
+    submitSearch(readSubmittedLocation());
   };
 
   const handleFormKeyDownCapture = (event) => {
@@ -126,8 +102,7 @@ function SearchBar({ value, onChange, onSearch }) {
     }
 
     event.preventDefault();
-    onSearch(getLiveLocationValue(event.currentTarget));
-    closeCombobox();
+    submitSearch(readSubmittedLocation());
   };
 
   const handleComboboxChange = (nextValue) => {
@@ -136,7 +111,7 @@ function SearchBar({ value, onChange, onSearch }) {
   };
 
   const comboboxLocations = [
-    ...locations,
+    ...presetLocations,
     ...(value === "Current Location" && !hasPresetLocation
       ? ["Current Location"]
       : []),
@@ -161,8 +136,7 @@ function SearchBar({ value, onChange, onSearch }) {
         onSelect={(item) => {
           latestInputValueRef.current = String(item ?? "");
           onChange(item);
-          onSearch(item);
-          closeCombobox();
+          submitSearch(item);
         }}
         data={comboboxLocations}
         placeholder="Select location ..."
@@ -189,16 +163,7 @@ function SearchBar({ value, onChange, onSearch }) {
   );
 }
 
-// HOW IT WORKS:
-// PeriodCard renders one forecast period object. The same component is reused in
-// both the current section and the forecast grid.
-//
-// Props:
-// - period: normalized period object from services/weatherGov.js
-// - variant: "current" or "forecast" (controls layout/styling only)
-//
-// WHY this component exists:
-// One reusable card removes duplicated UI code and keeps formatting consistent.
+// Reusable weather card for current and forecast sections.
 function PeriodCard({ period, variant }) {
   const isCurrent = variant === "current";
 
@@ -270,17 +235,8 @@ function PeriodCard({ period, variant }) {
   );
 }
 
-// HOW IT WORKS:
-// This component renders the "current" weather card.
-// It receives data through props and does not fetch anything itself.
-//
-// WHY prop-driven rendering:
-// Keeping this component "presentational" makes it easier to test and reuse.
-// App decides what data to provide; this component only decides how it looks.
+// Current weather display (presentational only).
 function CurrentWeatherDisplay({ periods, location }) {
-  // periods is an array:
-  // - Daytime: [todayPeriod, tonightPeriod]
-  // - Nighttime: [tonightPeriod]
   if (!periods || periods.length === 0) {
     return (
       <div className="bg-linear-to-br from-blue-400 to-blue-600 rounded-lg p-6 sm:p-8 text-white mb-8">
@@ -318,13 +274,7 @@ function CurrentWeatherDisplay({ periods, location }) {
   );
 }
 
-// HOW IT WORKS:
-// ForecastGrid receives an array of normalized period objects and renders one
-// card per period.
-//
-// WHY this component exists:
-// It keeps list rendering concerns in one place so the parent App component stays
-// focused on state + data flow.
+// Forecast grid for upcoming periods.
 function ForecastGrid({ periods }) {
   if (!periods || periods.length === 0) {
     return null;
@@ -348,37 +298,8 @@ function ForecastGrid({ periods }) {
   );
 }
 
-// HOW IT WORKS (React Hooks Deep Dive):
-// This is the stateful container component. It owns data fetching and state.
-// Child components are mostly presentational and receive props.
-//
-// useState explanation:
-// - useState creates state that survives re-renders.
-// - [locationInput, setLocationInput] stores current text in the search input.
-// - [weatherData, setWeatherData] stores fetched + normalized weather data.
-// - Calling a setter schedules a re-render with the new value.
-//
-// WHY useState here:
-// - locationInput changes with user typing and must drive both input + heading text.
-// - weatherData changes after async fetch and must update multiple UI sections
-//   (current conditions + forecast cards) in one consistent render.
-//
-// useEffect explanation:
-// - useEffect runs side effects after React renders.
-// - Side effects are operations outside pure rendering: API calls, geolocation,
-//   subscriptions, timers, manual DOM work, etc.
-// - This app uses useEffect once on mount to get device location automatically.
-//
-// WHY useEffect for geolocation:
-// - Geolocation is async and side-effectful (permission prompt + browser API call).
-// - It should not run during render itself.
-// - The empty dependency array [] means "run once after first render".
-//   This prevents repeated prompts/fetches on every re-render.
+// App container: fetches weather data and passes it to presentational components.
 export default function App() {
-  // locationInput: controlled text input value
-  // locationLabel: label shown in the weather card after a successful search
-  // weatherData: normalized weather data from weatherGov service helpers
-  // deviceCoords: latest successful geolocation coordinates for this session
   const [locationInput, setLocationInput] = useState("");
   const [locationLabel, setLocationLabel] = useState("");
   const [weatherData, setWeatherData] = useState(null);
@@ -386,6 +307,11 @@ export default function App() {
   const [isLoadingWeather, setIsLoadingWeather] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const hasAttemptedStartupLoad = useRef(false);
+
+  const applySuccessfulLocation = (label) => {
+    setLocationLabel(label);
+    setLocationInput("");
+  };
 
   const getFriendlyErrorMessage = (error, isStartupLoad = false) => {
     if (error?.code === 1) {
@@ -413,13 +339,7 @@ export default function App() {
     return "Unable to load weather right now. Please try again.";
   };
 
-  // HOW IT WORKS:
-  // Wrap the browser callback-style geolocation API in a Promise so we can use
-  // async/await in handleSearch.
-  //
-  // WHY this helper exists:
-  // It keeps geolocation details in one place and makes the search logic easier
-  // to read for beginners.
+  // Promise wrapper around browser geolocation so async/await can be used.
   const getDeviceCoords = () =>
     new Promise((resolve, reject) => {
       if (!navigator.geolocation) {
@@ -442,19 +362,37 @@ export default function App() {
       );
     });
 
-  // Shared loader used by startup geolocation and manual city search.
+  // Shared weather loader used by startup and manual searches.
   const loadWeatherByCoords = async (lat, lon) => {
     const data = await fetchWeatherByCoordsFromApi(lat, lon);
     setWeatherData(data);
   };
 
-  // HOW IT WORKS:
-  // On first app load, attempt geolocation. If successful, set a friendly label
-  // and fetch weather immediately using those coordinates.
-  //
-  // WHY this improves UX:
-  // Users see local weather instantly without typing.
-  // If permission is denied, app still works with manual search.
+  const searchCurrentLocation = async () => {
+    let coordsToUse = deviceCoords;
+
+    if (!coordsToUse) {
+      coordsToUse = await getDeviceCoords();
+      setDeviceCoords(coordsToUse);
+    }
+
+    await loadWeatherByCoords(coordsToUse.lat, coordsToUse.lon);
+    applySuccessfulLocation("Current Location");
+  };
+
+  const searchTypedLocation = async (normalizedLocation) => {
+    if (!normalizedLocation) {
+      setStatusMessage("Enter a location to search.");
+      return;
+    }
+
+    setLocationInput(normalizedLocation);
+    const { lat, lon } = await geocodeLocation(normalizedLocation);
+    await loadWeatherByCoords(lat, lon);
+    applySuccessfulLocation(normalizedLocation);
+  };
+
+  // Try loading local weather once on first render.
   useEffect(() => {
     if (hasAttemptedStartupLoad.current) {
       return;
@@ -462,10 +400,8 @@ export default function App() {
 
     hasAttemptedStartupLoad.current = true;
 
-    // WHY fire-and-forget:
-    // Startup weather loading is best-effort. If geolocation is denied/unavailable,
-    // the app should stay interactive and allow manual search.
-    void (async () => {
+    // Best-effort startup load; manual search remains available on failure.
+    const runStartupWeatherLoad = async () => {
       setIsLoadingWeather(true);
 
       try {
@@ -473,20 +409,19 @@ export default function App() {
         const latestCoords = await getDeviceCoords();
         setDeviceCoords(latestCoords);
         await loadWeatherByCoords(latestCoords.lat, latestCoords.lon);
-        setLocationLabel("Current Location");
-        setLocationInput("");
+        applySuccessfulLocation("Current Location");
       } catch (error) {
         setStatusMessage(getFriendlyErrorMessage(error, true));
         console.log(error);
       } finally {
         setIsLoadingWeather(false);
       }
-    })();
+    };
 
-    // Empty dependency array means this effect runs once on mount.
+    void runStartupWeatherLoad();
   }, []);
 
-  // Search flow: city text -> coordinates -> weather.
+  // Search flow: location text -> coordinates -> weather.
   const handleSearch = async (
     location = locationInput,
     isStartupLoad = false,
@@ -498,34 +433,12 @@ export default function App() {
 
       const normalizedLocation = String(location ?? "").trim();
 
-      // HOW IT WORKS:
-      // "Current Location" should use geolocation coordinates, not city geocoding.
-      // First try cached session coords. If not available, request coordinates now.
       if (normalizedLocation === "Current Location") {
-        let coordsToUse = deviceCoords;
-
-        if (!coordsToUse) {
-          coordsToUse = await getDeviceCoords();
-          setDeviceCoords(coordsToUse);
-        }
-
-        await loadWeatherByCoords(coordsToUse.lat, coordsToUse.lon);
-        setLocationLabel("Current Location");
-        setLocationInput("");
+        await searchCurrentLocation();
         return;
       }
 
-      if (!normalizedLocation) {
-        setStatusMessage("Enter a location to search.");
-        return;
-      }
-
-      setLocationInput(normalizedLocation);
-
-      const { lat, lon } = await geocodeLocation(normalizedLocation);
-      await loadWeatherByCoords(lat, lon);
-      setLocationLabel(normalizedLocation);
-      setLocationInput("");
+      await searchTypedLocation(normalizedLocation);
     } catch (error) {
       setStatusMessage(getFriendlyErrorMessage(error, isStartupLoad));
       console.log(error);
@@ -534,12 +447,6 @@ export default function App() {
     }
   };
 
-  // HOW IT WORKS:
-  // App composes the page and passes state + handlers down through props.
-  //
-  // WHY this composition style:
-  // It keeps data ownership centralized while letting child components stay focused
-  // on rendering specific pieces of UI.
   return (
     <div className="min-h-screen bg-gray-100">
       <div className="max-w-4xl mx-auto px-4 py-6 sm:py-8">
@@ -563,16 +470,11 @@ export default function App() {
           </p>
         )}
 
-        {/* HOW IT WORKS:
-            weatherData?.current uses optional chaining so first render is safe
-            before async data arrives. */}
         <CurrentWeatherDisplay
           periods={weatherData?.currentPeriods}
           location={locationLabel}
         />
 
-        {/* HOW IT WORKS:
-            weatherData?.forecastPeriods passes an array of normalized periods. */}
         <ForecastGrid periods={weatherData?.forecastPeriods} />
       </div>
     </div>
